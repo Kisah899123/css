@@ -24,6 +24,8 @@ import argparse
 import sys
 import subprocess
 import platform
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Cek apakah aioquic tersedia untuk HTTP/3/QUIC
 try:
